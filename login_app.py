@@ -113,7 +113,7 @@ def show_login_page():
         <div style="text-align: center; margin-bottom: 30px;">
             <div style="font-size: 60px; margin-bottom: 10px;">🛡️</div>
             <div class="main-title">Log in to SeaLand</div>
-            <div class="sub-title">国海证卷产品数据管理系统</div>
+            <div class="sub-title">国海证券产品数据管理系统</div>
         </div>
     """, unsafe_allow_html=True)
 
@@ -189,4 +189,5 @@ if __name__ == "__main__":
     if not st.session_state.logged_in:
         show_login_page()
     else:
+
         show_main_interface()
