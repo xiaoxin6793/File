@@ -27,17 +27,30 @@ STANDARD_COLUMNS = [
 ]
 
 MAPPING_LOGIC = {
-    "产品全称": "产品名称", "产品类型": "产品类型", "策略": "策略",
-    "管理人名称": "管理人", "产品风险类别": "风险评级",
-    "首次认购/申购起点（不含认/申购费）": "申购起点", "开放日": "开放日",
-    "封闭期": "锁定期", "申购费率": "申购费", "赎回费率": "赎回费",
+    "产品全称": "产品名称", 
+    "产品类型": "产品类型", 
+    "策略": "策略",
+    "管理人名称": "管理人", 
+    "产品风险类别": "风险评级",
+    "首次认购/申购起点（不含认/申购费）": "申购起点", 
+    "开放日": "开放日",
+    "封闭期": "锁定期", 
+    "申购费率": "申购费", 
+    "赎回费率": "赎回费",
     "对应管理类费率合计（管理费率+托管费率+服务费合计+其他如有）": "对应管理类费率合计",
-    "管理费率": "管理费", "托管费率": "托管费", "服务费合计": "服务费",
-    "其他如有":"其他（如有）", "业绩基准": "业绩基准",
-    "业绩报酬计提比例": "业绩报酬计提比例", "可买份额类型": "可买份额类型",
-    "申购确认日": "申购确认日", "赎回回款日期": "赎回回款日期",
-    "投资经理": "投资经理", "公司实控人": "公司实控人",
-    "基金备案编号": "基金备案编号", "托管人": "托管人"
+    "管理费率": "管理费", 
+    "托管费率": "托管费", 
+    "服务费合计": "服务费",
+    "其他如有":"其他（如有）", 
+    "业绩基准": "业绩基准",
+    "业绩报酬计提比例": "业绩报酬计提比例", 
+    "可买份额类型": "可买份额类型",
+    "申购确认日": "申购确认日", 
+    "赎回回款日期": "赎回回款日期",
+    "投资经理": "投资经理", 
+    "公司实控人": "公司实控人",
+    "基金备案编号": "基金备案编号", 
+    "托管人": "托管人"
 }
 
 # --- 2. 核心工具函数 ---
@@ -197,10 +210,25 @@ def get_net_values_df(product_id):
 
 def ui_entry_tab():
     st.subheader("📤 录入与上传")
+    
+    # --- 1. 初始化 ---
     if 'entry_df' not in st.session_state:
-        st.session_state.entry_df = pd.DataFrame(columns=STANDARD_COLUMNS)
+        st.session_state.entry_df = pd.DataFrame() 
     if 'processed_files' not in st.session_state:
         st.session_state.processed_files = []
+
+    # --- 2. 辅助函数：智能判断是否为百分比列 ---
+    def is_percent_col(col_name):
+        # 1. 核心关键词匹配 (只要表头含这些词，就自动转百分比)
+        keywords = ["费率", "比例", "收益率", "折扣", "占比", "税率", "费", "业绩报酬"]
+        if any(k in str(col_name) for k in keywords):
+            return True
+        # 2. 用户特指的模糊词 (例如 "其他如有")
+        special_words = ["其他如有", "其他（如有）"]
+        if any(s in str(col_name) for s in special_words):
+            return True
+        # 3. 在预定义的标准列表中
+        return col_name in PERCENT_COLUMNS
 
     c1, c2, c3 = st.columns([2, 1, 1])
     with c1:
@@ -208,12 +236,17 @@ def ui_entry_tab():
     with c2:
         st.write("")
         if st.button("➕ 手动增加一行", width='stretch'):
-            new_row = pd.DataFrame([{col: "" for col in STANDARD_COLUMNS}])
+            current_cols = st.session_state.entry_df.columns.tolist()
+            if not current_cols:
+                current_cols = STANDARD_COLUMNS
+            new_row = pd.DataFrame([{col: "" for col in current_cols}])
+            new_row = new_row[current_cols]
             st.session_state.entry_df = pd.concat([st.session_state.entry_df, new_row], ignore_index=True)
+            
     with c3:
         st.write("")
         if st.button("🧹 清空列表", width='stretch'):
-            st.session_state.entry_df = pd.DataFrame(columns=STANDARD_COLUMNS)
+            st.session_state.entry_df = pd.DataFrame()
             st.session_state.processed_files = []
             st.rerun()
 
@@ -222,6 +255,7 @@ def ui_entry_tab():
         for f in uploaded_files:
             if f.name not in st.session_state.processed_files:
                 try:
+                    # 读取 Excel (统一读为字符串)
                     try:
                         raw_xlsx = pd.read_excel(f, header=None, dtype=str).fillna("")
                     except:
@@ -229,22 +263,67 @@ def ui_entry_tab():
                         raw_xlsx = pd.read_excel(f, header=None, dtype=str).fillna("")
 
                     parsed = pd.DataFrame()
+                    ordered_columns = []
+                    
+                    # --- A. 竖版/KV格式解析 ---
                     if "项目" in str(raw_xlsx.iloc[0:15, 0].values):
                         keys = raw_xlsx[0].str.replace('*', '').str.replace('\n', '').str.strip()
                         val_col = 3 if raw_xlsx.shape[1] > 3 else raw_xlsx.shape[1]-1
-                        data_dict = {k: force_plain_str(v) for k, v in zip(keys, raw_xlsx[val_col]) if k and k != "项目"}
+                        
+                        data_dict = {}
+                        key_counter = {}
+                        
+                        for k, v in zip(keys, raw_xlsx[val_col]):
+                            k_str = str(k).strip()
+                            if k_str and k_str.lower() != 'nan' and k_str != "项目":
+                                # 处理重复键 (添加 _2, _3)
+                                if k_str in key_counter:
+                                    key_counter[k_str] += 1
+                                    unique_key = f"{k_str}_{key_counter[k_str]}"
+                                else:
+                                    key_counter[k_str] = 1
+                                    unique_key = k_str
+                                
+                                # --- 核心修复：智能判断是否应用百分比格式 ---
+                                # 这里传入 original key (k_str) 进行判断，而不是带后缀的 unique_key
+                                apply_percent = is_percent_col(k_str)
+                                data_dict[unique_key] = force_plain_str(v, is_percent=apply_percent)
+                                
+                                ordered_columns.append(unique_key)
+                        
                         parsed = pd.DataFrame([data_dict])
+                        parsed = parsed[ordered_columns]
+                        
+                    # --- B. 横版/列表格式解析 ---
                     else:
                         f.seek(0)
                         parsed = pd.read_excel(f, dtype=str).fillna("").map(force_plain_str)
+                        # 这里横版比较难逐列判断百分比，因为我们是整体 map。
+                        # 补救：对表头进行遍历，如果是百分比列，重新格式化该列
                         parsed = parsed.loc[:, ~parsed.columns.astype(str).str.contains('^Unnamed')]
+                        for col in parsed.columns:
+                            if is_percent_col(col):
+                                parsed[col] = parsed[col].apply(lambda x: to_percent_str(x))
+                        ordered_columns = parsed.columns.tolist()
 
+                    # 标准化与排序逻辑 (保持不变)
                     for old_k, new_k in MAPPING_LOGIC.items():
                         if old_k in parsed.columns: parsed[new_k] = parsed[old_k]
                     
                     for col in STANDARD_COLUMNS:
                         if col not in parsed.columns: parsed[col] = ""
-                    parsed = parsed[STANDARD_COLUMNS]
+                    
+                    final_order = []
+                    seen = set()
+                    for k in ordered_columns:
+                        if k in parsed.columns and k not in seen:
+                            final_order.append(k)
+                            seen.add(k)
+                    for k in parsed.columns:
+                        if k not in seen:
+                            final_order.append(k)
+                            seen.add(k)      
+                    parsed = parsed[final_order]
 
                     new_data_list.append(parsed)
                     st.session_state.processed_files.append(f.name)
@@ -253,18 +332,34 @@ def ui_entry_tab():
 
         if new_data_list:
             combined_new = pd.concat(new_data_list, ignore_index=True)
-            st.session_state.entry_df = pd.concat([st.session_state.entry_df, combined_new], ignore_index=True).fillna("")
+            if st.session_state.entry_df.empty:
+                st.session_state.entry_df = combined_new
+            else:
+                st.session_state.entry_df = pd.concat([st.session_state.entry_df, combined_new], ignore_index=True).fillna("")
             st.success(f"成功导入 {len(combined_new)} 条新记录")
             st.rerun()
 
     if not st.session_state.entry_df.empty:
-        st.info("💡 提示：您可以直接在下方表格修改数据，确认无误后点击“确认同步”。")
+        st.info("💡 提示：所有含'费'或'率'的字段已自动转为百分比；重复字段已在显示时隐藏后缀。")
+        
+        # --- 核心修复：更强力的列配置，隐藏 _2, _3 ---
+        my_column_config = {}
+        for col_name in st.session_state.entry_df.columns:
+            # 匹配 _数字 结尾的列名
+            if re.search(r'_\d+$', str(col_name)):
+                original_name = re.sub(r'_\d+$', '', str(col_name))
+                # 使用 TextColumn 并明确指定 label，这通常比默认 Column 更有效
+                my_column_config[col_name] = st.column_config.TextColumn(
+                    label=original_name,
+                    width="medium" 
+                )
         
         edited_df = st.data_editor(
             st.session_state.entry_df, 
             num_rows="dynamic", 
             key="editor_main", 
-            width='stretch' 
+            width='stretch',
+            column_config=my_column_config # 应用配置
         )
         
         if not edited_df.equals(st.session_state.entry_df):
@@ -278,7 +373,7 @@ def ui_entry_tab():
                     save_product_to_db(name, row.to_dict())
                     count += 1
             st.success(f"成功同步 {count} 条数据")
-            st.session_state.entry_df = pd.DataFrame(columns=STANDARD_COLUMNS)
+            st.session_state.entry_df = pd.DataFrame()
             st.session_state.processed_files = [] 
             st.rerun()
 
